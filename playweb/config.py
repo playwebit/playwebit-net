@@ -24,10 +24,10 @@ DECIMALS      = 18
 
 AUTHORITY_WALLET = os.getenv(
     "PLAYWEBIT_AUTHORITY_WALLET",
-    "0xREPLACE_WITH_YOUR_REAL_WALLET"
+    "0x101A249DE184ECdA4b9D3B2c8844eaB8102bB378"
 )
 
-if AUTHORITY_WALLET == "0xREPLACE_WITH_YOUR_REAL_WALLET":
+if AUTHORITY_WALLET == "0x101A249DE184ECdA4b9D3B2c8844eaB8102bB378":
     import warnings
     warnings.warn(
         "PLAYWEBIT_AUTHORITY_WALLET env var not set. "
@@ -119,7 +119,7 @@ CONSENSUS_ROUND_PHASES = [
 
 BOOTSTRAP_URL = os.getenv(
     "PLAYWEBIT_BOOTSTRAP_URL",
-    "https://bootstrap.playwebit.com"
+    "https://small-field-be1c.playwebit.workers.dev"
 )
 
 BOOTSTRAP_ENDPOINTS = {
