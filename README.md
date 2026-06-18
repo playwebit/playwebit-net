@@ -2,7 +2,7 @@
 
 > Public blockchain infrastructure for cross-platform digital ownership, royalty enforcement, and content integrity verification.
 
-**Chain ID:** 4968 | **Currency:** PLWB | **Consensus:** NVF-BFT | **License:** MIT
+**Chain ID:** 4968 | **Currency:** PLWB | **Consensus:** NVF-BFT | **License:** Apache - 2.0
 
 ---
 
