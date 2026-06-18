@@ -138,7 +138,7 @@ class NVFBFTConsensus:
         # PHASE: PROPOSE
         # NVF: Spacetime Fabric activation
         am_leader = self.leader_election.is_leader(
-            next_index, active_nodes
+            self.node_wallet, next_index, active_nodes
         )
 
         if am_leader:
