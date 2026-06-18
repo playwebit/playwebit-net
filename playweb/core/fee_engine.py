@@ -50,6 +50,11 @@ class FeeEngine:
             total = CV_LINK_FEE
             return self._split(total)
 
+        if tx_type in ("transfer", "content_register", "ownership_transfer",
+                   "edition_transfer", "spider_hash_anchor", "node_register"):
+            total = TRANSACTION_FEE
+            return self._split(total)
+
         if tx_type == "plwb_redeem":
             # Redemption fee = 5% of redemption amount, 100% to authority
             total = amount * PLWB_REDEMPTION_FEE
