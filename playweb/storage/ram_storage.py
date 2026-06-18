@@ -1,0 +1,101 @@
+"""
+PlayWebit Network — RAM Storage
+Everything in Python dicts. Lost on restart.
+Use for: testing, development, light nodes.
+"""
+
+import logging
+from typing import List, Optional, Dict
+
+from playweb.storage.base import ChainStorage
+
+logger = logging.getLogger(__name__)
+
+
+class RAMStorage(ChainStorage):
+
+    def __init__(self):
+        self._blocks_by_hash:   Dict[str, object] = {}
+        self._blocks_by_index:  Dict[int, object] = {}
+        self._transactions:     Dict[str, object] = {}
+        self._balances:         Dict[str, float]  = {}
+        self._content_registry: Dict[str, Dict]   = {}
+        self._edition_registry: Dict[str, Dict]   = {}
+        self._chain_length:     int               = 0
+        logger.info("RAMStorage initialised (data lost on restart)")
+
+    # ─── Blocks ──────────────────────────────────────────────────
+
+    def save_block(self, block) -> bool:
+        self._blocks_by_hash[block.hash]   = block
+        self._blocks_by_index[block.index] = block
+        self._chain_length = max(self._chain_length, block.index + 1)
+        return True
+
+    def get_block(self, block_hash: str):
+        return self._blocks_by_hash.get(block_hash)
+
+    def get_block_by_index(self, index: int):
+        return self._blocks_by_index.get(index)
+
+    def get_chain_tip(self):
+        if self._chain_length == 0:
+            return None
+        return self._blocks_by_index.get(self._chain_length - 1)
+
+    def get_chain_length(self) -> int:
+        return self._chain_length
+
+    def get_blocks_from(self, from_index: int, limit: int = 50) -> List:
+        blocks = []
+        for i in range(from_index, min(from_index + limit, self._chain_length)):
+            block = self._blocks_by_index.get(i)
+            if block:
+                blocks.append(block)
+        return blocks
+
+    # ─── Transactions ─────────────────────────────────────────────
+
+    def save_transaction(self, tx) -> bool:
+        self._transactions[tx.hash] = tx
+        return True
+
+    def get_transaction(self, tx_hash: str):
+        return self._transactions.get(tx_hash)
+
+    # ─── Balances ────────────────────────────────────────────────
+
+    def get_balance(self, address: str) -> float:
+        return self._balances.get(address.lower(), 0.0)
+
+    def save_balance(self, address: str, balance: float) -> bool:
+        self._balances[address.lower()] = max(0.0, balance)
+        return True
+
+    def get_all_addresses(self) -> List[str]:
+        return list(self._balances.keys())
+
+    # ─── Content Registry ─────────────────────────────────────────
+
+    def save_content_record(self, record: Dict) -> bool:
+        self._content_registry[record["cid"]] = record
+        return True
+
+    def get_content_record(self, cid: str) -> Optional[Dict]:
+        return self._content_registry.get(cid)
+
+    # ─── Edition Registry ─────────────────────────────────────────
+
+    def save_edition_record(self, record: Dict) -> bool:
+        key = f"{record['cid']}:{record['edition_number']}"
+        self._edition_registry[key] = record
+        return True
+
+    def get_edition_record(self, cid: str, edition_number: int) -> Optional[Dict]:
+        return self._edition_registry.get(f"{cid}:{edition_number}")
+
+    def get_all_edition_records(self, cid: str) -> List[Dict]:
+        return [
+            v for k, v in self._edition_registry.items()
+            if k.startswith(f"{cid}:")
+        ]
