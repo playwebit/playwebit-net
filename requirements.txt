@@ -1,0 +1,17 @@
+# PlayWebit Network — Node Requirements
+
+# Core (required)
+flask>=2.3.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+apscheduler>=3.10.0
+
+# Signature verification (strongly recommended)
+eth-account>=0.10.0
+
+# Storage — install ONE of these (or multiple)
+# supabase>=2.0.0        # HuggingFace / cloud without persistent disk
+# plyvel>=1.5.0          # LevelDB — fastest, for VPS/AWS
+
+# Installed by default for HuggingFace nodes
+supabase>=2.0.0
