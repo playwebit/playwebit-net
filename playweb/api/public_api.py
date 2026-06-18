@@ -1,0 +1,266 @@
+"""
+PlayWebit Network — Public API
+HTTP endpoints for dApps, clients, and the spiderweave-sdk.
+
+spiderweave-sdk's PlayWebitAdapter calls:
+  POST /api/anchor_spider_hash
+  GET  /api/transaction/{tx_hash}
+  GET  /api/spider_hashes/{chain_id}
+
+All other endpoints are for general dApp use.
+"""
+
+import logging
+from flask import Blueprint, request, jsonify
+
+logger = logging.getLogger(__name__)
+
+
+def create_public_api(node) -> Blueprint:
+    """
+    Factory — creates the public API blueprint bound to a node instance.
+    Mount in Flask app: app.register_blueprint(create_public_api(node))
+    """
+    bp = Blueprint("public_api", __name__, url_prefix="/api")
+
+    # ─────────────────────────────────────────────────────────────
+    # Spider Hash Anchor
+    # Called by spiderweave-sdk's PlayWebitAdapter
+    # ─────────────────────────────────────────────────────────────
+
+    @bp.route("/anchor_spider_hash", methods=["POST"])
+    def anchor_spider_hash():
+        """
+        Anchor a SpiderWeave hash on the chain.
+        L1 stores it, never interprets it.
+        The hash can represent any database state on any platform.
+        """
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({"success": False, "error": "Missing body"}), 400
+
+        chain_name  = data.get("chain_id") or data.get("chain_name")
+        spider_hash = data.get("spider_hash")
+        event_type  = data.get("event_type", "integrity_check")
+        platform_wallet = data.get("platform_wallet") or data.get("wallet")
+        signature   = data.get("signature")
+        metadata    = data.get("metadata", {})
+
+        if not chain_name or not spider_hash:
+            return jsonify({
+                "success": False,
+                "error":   "Missing chain_id/chain_name and spider_hash",
+            }), 400
+
+        if not platform_wallet:
+            return jsonify({
+                "success": False,
+                "error":   "Missing platform_wallet",
+            }), 400
+
+        from playweb.core.transaction import Transaction
+        tx = Transaction(
+            from_addr   = platform_wallet.lower(),
+            to_addr     = platform_wallet.lower(),
+            amount      = 0,
+            tx_type     = "spider_hash_anchor",
+            signature   = signature,
+            spider_hash = spider_hash,
+            chain_name  = chain_name,
+            data        = {
+                "event_type":  event_type,
+                "platform":    data.get("platform_id", "unknown"),
+                **metadata,
+            },
+        )
+
+        success, result = node.blockchain.add_transaction(
+            tx          = tx,
+            node_wallet = node.node_wallet,
+        )
+
+        if not success:
+            return jsonify({"success": False, "error": result}), 400
+
+        # Broadcast to peers
+        node.gossip.broadcast_transaction(
+            tx    = tx,
+            peers = node.peer_manager.get_active_peers(),
+        )
+
+        return jsonify({
+            "success":   True,
+            "tx_hash":   tx.hash,
+            "chain_id":  chain_name,
+            "status":    "pending",
+        })
+
+    # ─────────────────────────────────────────────────────────────
+    # Get transaction
+    # Called by spiderweave-sdk to verify anchored hashes
+    # ─────────────────────────────────────────────────────────────
+
+    @bp.route("/transaction/<tx_hash>", methods=["GET"])
+    def get_transaction(tx_hash):
+        tx = node.blockchain.get_transaction(tx_hash)
+        if not tx:
+            return jsonify({"success": False, "error": "Transaction not found"}), 404
+        return jsonify({
+            "success":     True,
+            "transaction": tx.to_dict(),
+        })
+
+    # ─────────────────────────────────────────────────────────────
+    # Get spider hashes for a chain
+    # Called by spiderweave-sdk to get all anchored hashes
+    # ─────────────────────────────────────────────────────────────
+
+    @bp.route("/spider_hashes/<chain_name>", methods=["GET"])
+    def get_spider_hashes(chain_name):
+        """
+        Get all spider hash anchors for a given chain_name.
+        Scans blocks for spider_hash_anchor transactions.
+        """
+        hashes = []
+        length = node.blockchain.get_chain_length()
+
+        # Scan recent blocks (last 1000 or full chain if smaller)
+        scan_from = max(0, length - 1000)
+        blocks    = node.blockchain.get_blocks_from(scan_from, 1000)
+
+        for block in blocks:
+            for tx in block.transactions:
+                if (
+                    tx.tx_type == "spider_hash_anchor"
+                    and tx.chain_name == chain_name
+                ):
+                    hashes.append({
+                        "tx_hash":     tx.hash,
+                        "spider_hash": tx.spider_hash,
+                        "timestamp":   tx.timestamp,
+                        "block_index": block.index,
+                        "event_type":  tx.data.get("event_type")
+                                       if tx.data else None,
+                    })
+
+        return jsonify({
+            "success":    True,
+            "chain_name": chain_name,
+            "count":      len(hashes),
+            "hashes":     hashes,
+        })
+
+    # ─────────────────────────────────────────────────────────────
+    # Balance
+    # ─────────────────────────────────────────────────────────────
+
+    @bp.route("/balance/<address>", methods=["GET"])
+    def get_balance(address):
+        balance = node.blockchain.get_balance(address)
+        return jsonify({
+            "success": True,
+            "address": address.lower(),
+            "balance": balance,
+            "currency": "PLWB",
+        })
+
+    # ─────────────────────────────────────────────────────────────
+    # Submit transaction
+    # ─────────────────────────────────────────────────────────────
+
+    @bp.route("/transaction", methods=["POST"])
+    def submit_transaction():
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({"success": False, "error": "Missing body"}), 400
+
+        from playweb.core.transaction import Transaction
+        try:
+            tx = Transaction.from_dict(data)
+        except Exception as e:
+            return jsonify({"success": False, "error": f"Invalid tx: {e}"}), 400
+
+        success, result = node.blockchain.add_transaction(
+            tx          = tx,
+            node_wallet = node.node_wallet,
+        )
+
+        if success:
+            node.gossip.broadcast_transaction(
+                tx    = tx,
+                peers = node.peer_manager.get_active_peers(),
+            )
+
+        return jsonify({"success": success, "result": result})
+
+    # ─────────────────────────────────────────────────────────────
+    # Content ownership
+    # ─────────────────────────────────────────────────────────────
+
+    @bp.route("/owner/<path:cid>", methods=["GET"])
+    def get_owner(cid):
+        """Who owns this CID across all platforms."""
+        owner = node.content_registry.get_owner(cid)
+        if not owner:
+            return jsonify({
+                "success": False,
+                "error":   "CID not registered on PlayWebit Network",
+            }), 404
+        return jsonify({"success": True, **owner})
+
+    @bp.route("/check_duplicate/<path:cid>", methods=["GET"])
+    def check_duplicate(cid):
+        """Is this CID already registered anywhere on the network?"""
+        result = node.content_registry.check_duplicate(cid)
+        return jsonify({"success": True, **result})
+
+    @bp.route("/verify_ownership", methods=["POST"])
+    def verify_ownership():
+        data   = request.get_json(silent=True) or {}
+        cid    = data.get("cid")
+        wallet = data.get("wallet")
+        if not cid or not wallet:
+            return jsonify({"success": False, "error": "Missing cid or wallet"}), 400
+        owns = node.content_registry.verify_ownership(cid, wallet)
+        return jsonify({"success": True, "owns": owns, "cid": cid, "wallet": wallet})
+
+    # ─────────────────────────────────────────────────────────────
+    # Editions
+    # ─────────────────────────────────────────────────────────────
+
+    @bp.route("/editions/<path:cid>", methods=["GET"])
+    def get_editions(cid):
+        """All editions, all owners, all platforms for a CID."""
+        summary = node.edition_registry.get_edition_summary(cid)
+        return jsonify({"success": True, **summary})
+
+    @bp.route("/editions/<path:cid>/<int:edition_number>", methods=["GET"])
+    def get_edition(cid, edition_number):
+        edition = node.edition_registry.get_edition(cid, edition_number)
+        if not edition:
+            return jsonify({"success": False, "error": "Edition not found"}), 404
+        return jsonify({"success": True, "edition": edition})
+
+    # ─────────────────────────────────────────────────────────────
+    # Network stats
+    # ─────────────────────────────────────────────────────────────
+
+    @bp.route("/network/stats", methods=["GET"])
+    def network_stats():
+        tip   = node.blockchain.get_chain_tip()
+        stats = node.blockchain.get_stats()
+        return jsonify({
+            "success":      True,
+            "chain_id":     4968,
+            "currency":     "PLWB",
+            "block_height": tip.index if tip else 0,
+            "chain_length": stats["chain_length"],
+            "pending_txs":  stats["pending_tx_count"],
+            "node_count":   node.peer_manager.peer_count() + 1,
+            "node_wallet":  node.node_wallet,
+            "consensus":    node.consensus.get_status(),
+            "sync":         node.sync.get_sync_status(),
+            "plugins":      node.plugin_manager.get_status(),
+        })
+
+    return bp
