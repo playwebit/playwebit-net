@@ -15,23 +15,23 @@ setup(
     python_requires  = ">=3.10",
 
     install_requires = [
-        "flask>=2.3.0",
-        "requests>=2.31.0",
-        "python-dotenv>=1.0.0",
-        "apscheduler>=3.10.0",
+        "flask",
+        "requests",
+        "python-dotenv",
+        "apscheduler",
     ],
 
     extras_require = {
         # Signature verification (recommended)
-        "eth":      ["eth-account>=0.10.0"],
+        "eth":      ["eth-account"],
         # Storage backends (install what you need)
-        "leveldb":  ["plyvel>=1.5.0"],
-        "supabase": ["supabase>=2.0.0"],
+        "leveldb":  ["plyvel"],
+        "supabase": ["supabase"],
         # Everything
         "all": [
-            "eth-account>=0.10.0",
-            "plyvel>=1.5.0",
-            "supabase>=2.0.0",
+            "eth-account",
+            "plyvel",
+            "supabase",
         ],
     },
 
