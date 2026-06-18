@@ -138,7 +138,7 @@ class Transaction:
             return False, f"Unknown tx_type: {self.tx_type}"
         if self.chain_id != CHAIN_ID:
             return False, f"Wrong chain_id: {self.chain_id}, expected {CHAIN_ID}"
-        if not self.nonce:
+        if self.nonce is None:
             return False, "Missing nonce"
 
         # Conditional checks
