@@ -78,7 +78,12 @@ class RAMStorage(ChainStorage):
     # ─── Content Registry ─────────────────────────────────────────
 
     def save_content_record(self, record: Dict) -> bool:
-        self._content_registry[record["cid"]] = record
+        # Normalise wallet addresses to lowercase
+        normalised = dict(record)
+        for key in ("creator_wallet", "first_owner", "current_owner"):
+            if normalised.get(key):
+                normalised[key] = normalised[key].lower()
+        self._content_registry[normalised["cid"]] = normalised
         return True
 
     def get_content_record(self, cid: str) -> Optional[Dict]:
