@@ -58,7 +58,9 @@ class Bootstrap:
             message = f"playwebit-bootstrap:{self.node_url}:{timestamp}"
             msg     = encode_defunct(text=message)
             signed  = Account.sign_message(msg, private_key=self.node_private_key)
-            return signed.signature.hex()
+            sig = signed.signature.hex()
+            # ensure 0x prefix — Worker requires it
+            return sig if sig.startswith("0x") else "0x" + sig
         except ImportError:
             # Fallback placeholder signature (format-valid)
             raw = f"{self.node_url}:{timestamp}:{self.node_wallet}"
