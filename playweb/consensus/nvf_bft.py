@@ -88,6 +88,7 @@ class NVFBFTConsensus:
         self._lock              = threading.Lock()
         self._running           = False
         self._thread:           Optional[threading.Thread] = None
+        self._batch_timer_start = None
 
     # ─────────────────────────────────────────────────────────────
     # Lifecycle
