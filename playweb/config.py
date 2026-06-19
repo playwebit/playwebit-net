@@ -94,6 +94,7 @@ AUTHORITY_TX_TYPES = [
     "reward",
     "plwb_purchase",
     "plwb_redeem",
+    "spider_hash_anchor",
 ]
 
 # ─────────────────────────────────────────────
