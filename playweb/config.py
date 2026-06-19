@@ -22,18 +22,7 @@ DECIMALS      = 18
 # Changing this = your blocks get rejected by network.
 # ─────────────────────────────────────────────
 
-AUTHORITY_WALLET = os.getenv(
-    "PLAYWEBIT_AUTHORITY_WALLET",
-    "0x101A249DE184ECdA4b9D3B2c8844eaB8102bB378"
-)
-
-if AUTHORITY_WALLET == "0x101A249DE184ECdA4b9D3B2c8844eaB8102bB378":
-    import warnings
-    warnings.warn(
-        "PLAYWEBIT_AUTHORITY_WALLET env var not set. "
-        "Set it before running in production.",
-        RuntimeWarning
-    )
+AUTHORITY_WALLET = "0x101A249DE184ECdA4b9D3B2c8844eaB8102bB378"
 
 # ─────────────────────────────────────────────
 # L1 FEES — enforced by consensus
@@ -103,7 +92,6 @@ AUTHORITY_TX_TYPES = [
 
 CONSENSUS_QUORUM       = 0.667   # 2/3 of active nodes must vote
 BLOCK_TIME             = 30      # seconds between blocks
-MAX_TX_PER_BLOCK       = 100     # max transactions per block
 CONSENSUS_TIMEOUT      = 15      # seconds before round times out
 CONSENSUS_ROUND_PHASES = [
     "PROPOSE",   # leader broadcasts block candidate
@@ -147,6 +135,8 @@ NODE_TTL                     = 86400   # 24 hours — auto-expire dead nodes
 
 MINING_MODE       = "nvf_bft"
 WRITE_DELAY       = 5   # seconds between storage writes (rate limiting)
+BATCH_TIMEOUT      = 300  # 5 minutes — mine after this regardless
+MAX_TX_PER_BLOCK   = 10
 
 # ─────────────────────────────────────────────
 # NETWORK / P2P
