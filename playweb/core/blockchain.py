@@ -93,7 +93,7 @@ class Blockchain:
                 return False, "Invalid signature"
 
         # Balance check (skip for authority txs)
-        if tx.tx_type not in AUTHORITY_TX_TYPES:
+        if tx.tx_type not in AUTHORITY_TX_TYPES and tx.amount > 0:
             fee_info     = self.fee_engine.calculate_fee(tx.tx_type, tx.amount)
             total_needed = tx.amount + fee_info["total"]
             balance      = self.get_balance(tx.from_addr)
