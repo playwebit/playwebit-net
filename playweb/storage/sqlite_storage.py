@@ -257,7 +257,7 @@ class SQLiteStorage(ChainStorage):
                     record["cid"],
                     record.get("creator_wallet"),
                     record.get("first_owner"),
-                    record.get("current_owner", record.get("first_owner")).lower(),
+                    record.get("current_owner", record.get("first_owner", "")).lower(),
                     record.get("first_platform", "unknown"),
                     record.get("first_tx_hash"),
                     record.get("first_block"),
