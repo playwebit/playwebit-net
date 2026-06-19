@@ -24,6 +24,8 @@ from playweb.config           import (
     CONSENSUS_QUORUM,
     BLOCK_TIME,
     CONSENSUS_TIMEOUT,
+    BATCH_TIMEOUT,
+    CONSENSUS_TIMEOUT,
 )
 
 logger = logging.getLogger(__name__)
@@ -114,16 +116,51 @@ class NVFBFTConsensus:
 
     def _consensus_loop(self):
         """
-        Main loop — runs every BLOCK_TIME seconds.
-        If this node is the leader, proposes a block.
-        Otherwise, waits for a proposal from the leader.
+        Event-driven mining:
+        - Waits for first transaction
+        - Starts 5 minute batch timer
+        - Mines immediately if MAX_TX_PER_BLOCK reached
+        - Mines with whatever is pending when timer expires
         """
         while self._running:
             try:
-                self._run_round()
+                pending = self.blockchain.mempool.size()
+    
+                if pending == 0:
+                    # No transactions — just wait, don't mine empty blocks
+                    time.sleep(5)
+                    continue
+    
+                # Transactions exist — check if timer started
+                if self._batch_timer_start is None:
+                    self._batch_timer_start = time.time()
+                    logger.info(
+                        f"Mining timer started — "
+                        f"{pending} tx(s) pending, "
+                        f"waiting up to {BATCH_TIMEOUT}s or "
+                        f"{MAX_TX_PER_BLOCK} txs"
+                    )
+    
+                elapsed     = time.time() - self._batch_timer_start
+                should_mine = (
+                    pending >= MAX_TX_PER_BLOCK   # max txs reached → mine now
+                    or elapsed >= BATCH_TIMEOUT    # 5 min passed → mine now
+                )
+    
+                if should_mine:
+                    logger.info(
+                        f"Mining block: {pending} txs, "
+                        f"elapsed={elapsed:.0f}s, "
+                        f"reason={'max_txs' if pending >= MAX_TX_PER_BLOCK else 'timeout'}"
+                    )
+                    self._run_round()
+                    self._batch_timer_start = None   # reset timer after mining
+    
             except Exception as e:
-                logger.error(f"Consensus round error: {e}", exc_info=True)
-            time.sleep(BLOCK_TIME)
+                logger.error(f"Consensus error: {e}", exc_info=True)
+                self._batch_timer_start = None
+    
+            time.sleep(5)   # check every 5 seconds
 
     def _run_round(self):
         """Execute one consensus round."""
