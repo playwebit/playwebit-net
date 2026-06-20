@@ -54,20 +54,15 @@ class ConsensusRound:
         self.votes[vote.voter_wallet] = vote
         return True
 
-    def has_quorum(self, active_node_count: int) -> bool:
+    def has_quorum(self, active_node_count: int, node_wallet: str = "") -> bool:
         if active_node_count == 0:
             return False
-    
-        # Single node special case
         if active_node_count == 1:
             # Only authority node can mine alone
-            # Non-authority single node must wait for peers
-            if self.node_wallet == AUTHORITY_WALLET.lower():
+            if node_wallet.lower() == AUTHORITY_WALLET.lower():
                 return len(self.votes) >= 1
             else:
                 return False
-    
-        # Multiple nodes — standard 2/3 quorum, any nodes
         return len(self.votes) / active_node_count >= CONSENSUS_QUORUM
 
     def is_timed_out(self) -> bool:
@@ -317,7 +312,7 @@ class NVFBFTConsensus:
                 f"for block {self.current_round.block_index}"
             )
 
-            if self.current_round.has_quorum(active_count):
+            if self.current_round.has_quorum(active_count, self.node_wallet):
                 if not self.current_round.finalised:
                     self.current_round.finalised = True
                     self._commit(
