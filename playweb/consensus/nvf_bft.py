@@ -25,7 +25,7 @@ from playweb.config           import (
     BLOCK_TIME,
     CONSENSUS_TIMEOUT,
     BATCH_TIMEOUT,
-    CONSENSUS_TIMEOUT,
+    MAX_TX_PER_BLOCK,
     AUTHORITY_WALLET,
 )
 
