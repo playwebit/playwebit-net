@@ -117,17 +117,13 @@ def create_public_api(node) -> Blueprint:
 
     @bp.route("/spider_hashes/<chain_name>", methods=["GET"])
     def get_spider_hashes(chain_name):
-        """
-        Get all spider hash anchors for a given chain_name.
-        Scans blocks for spider_hash_anchor transactions.
-        """
         hashes = []
-        length = node.blockchain.get_chain_length()
-
-        # Scan recent blocks (last 1000 or full chain if smaller)
+    
+        # ── Confirmed (in blocks) ─────────────────────────────────
+        length    = node.blockchain.get_chain_length()
         scan_from = max(0, length - 1000)
         blocks    = node.blockchain.get_blocks_from(scan_from, 1000)
-
+    
         for block in blocks:
             for tx in block.transactions:
                 if (
@@ -139,14 +135,33 @@ def create_public_api(node) -> Blueprint:
                         "spider_hash": tx.spider_hash,
                         "timestamp":   tx.timestamp,
                         "block_index": block.index,
+                        "status":      "confirmed",
                         "event_type":  tx.data.get("event_type")
                                        if tx.data else None,
                     })
-
+    
+        # ── Pending (in mempool — not yet mined) ─────────────────
+        for tx in node.blockchain.mempool.get_pending():
+            if (
+                tx.tx_type == "spider_hash_anchor"
+                and tx.chain_name == chain_name
+            ):
+                hashes.append({
+                    "tx_hash":     tx.hash,
+                    "spider_hash": tx.spider_hash,
+                    "timestamp":   tx.timestamp,
+                    "block_index": None,
+                    "status":      "pending",
+                    "event_type":  tx.data.get("event_type")
+                                   if tx.data else None,
+                })
+    
         return jsonify({
             "success":    True,
             "chain_name": chain_name,
             "count":      len(hashes),
+            "confirmed":  len([h for h in hashes if h["status"] == "confirmed"]),
+            "pending":    len([h for h in hashes if h["status"] == "pending"]),
             "hashes":     hashes,
         })
 
