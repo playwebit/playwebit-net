@@ -17,6 +17,7 @@ from playweb.config import (
     FEE_SPLIT_NODE,
     SPLITTABLE_FEE_TYPES,
     AUTHORITY_ONLY_FEE_TYPES,
+    AUTHORITY_TX_TYPES,
 )
 
 logger = logging.getLogger(__name__)
@@ -200,6 +201,9 @@ class FeeEngine:
         for tx in transactions:
             if tx.tx_type == "fee":
                 continue  # skip fee txs themselves
+
+            if tx.tx_type in AUTHORITY_TX_TYPES:
+                continue
 
             fee_info = self.calculate_fee(tx.tx_type, tx.amount)
 
