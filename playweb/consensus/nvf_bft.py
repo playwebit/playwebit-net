@@ -26,6 +26,7 @@ from playweb.config           import (
     CONSENSUS_TIMEOUT,
     BATCH_TIMEOUT,
     CONSENSUS_TIMEOUT,
+    AUTHORITY_WALLET,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,9 +55,19 @@ class ConsensusRound:
         return True
 
     def has_quorum(self, active_node_count: int) -> bool:
-        """Check if 2/3 quorum has been reached."""
         if active_node_count == 0:
             return False
+    
+        # Single node special case
+        if active_node_count == 1:
+            # Only authority node can mine alone
+            # Non-authority single node must wait for peers
+            if self.node_wallet == AUTHORITY_WALLET.lower():
+                return len(self.votes) >= 1
+            else:
+                return False
+    
+        # Multiple nodes — standard 2/3 quorum, any nodes
         return len(self.votes) / active_node_count >= CONSENSUS_QUORUM
 
     def is_timed_out(self) -> bool:
