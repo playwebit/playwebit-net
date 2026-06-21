@@ -291,6 +291,27 @@ class SQLiteStorage(ChainStorage):
             record.update(json.loads(record.pop("extra")))
         return record
 
+    def get_all_content_by_owner(self, address: str) -> List[Dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM content_registry WHERE current_owner = ?",
+                (address.lower(),)
+            ).fetchall()
+        return [dict(r) for r in rows]
+    
+    def get_cid_by_int_id(self, int_id: int) -> Optional[str]:
+        # Scan all CIDs and check int_id
+        # For better performance add int_token_id column (see note below)
+        from playweb.api.erc721 import cid_to_int_id
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT cid FROM content_registry"
+            ).fetchall()
+        for row in rows:
+            if cid_to_int_id(row["cid"]) == int_id:
+                return row["cid"]
+        return None
+
     # ─── Edition Registry ─────────────────────────────────────────
 
     def save_edition_record(self, record: Dict) -> bool:
