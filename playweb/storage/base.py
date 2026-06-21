@@ -135,3 +135,20 @@ class ChainStorage(ABC):
     def get_all_edition_records(self, cid: str) -> List[Dict]:
         """Get all edition records for a CID."""
         ...
+
+    @abstractmethod
+    def get_all_content_by_owner(self, address: str) -> List[Dict]:
+        """
+        Get all content records where current_owner = address.
+        Used by ERC721 balanceOf() to count NFTs.
+        """
+        ...
+    
+    @abstractmethod
+    def get_cid_by_int_id(self, int_id: int) -> Optional[str]:
+        """
+        Get CID string from integer token ID.
+        Integer IDs are used by MetaMask (uint256).
+        Computed as: sha256(cid)[:16] as int.
+        """
+        ...
