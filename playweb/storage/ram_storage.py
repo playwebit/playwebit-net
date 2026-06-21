@@ -89,6 +89,20 @@ class RAMStorage(ChainStorage):
     def get_content_record(self, cid: str) -> Optional[Dict]:
         return self._content_registry.get(cid)
 
+    def get_all_content_by_owner(self, address: str) -> List[Dict]:
+        addr = address.lower()
+        return [
+            r for r in self._content_registry.values()
+            if r.get("current_owner", "").lower() == addr
+        ]
+    
+    def get_cid_by_int_id(self, int_id: int) -> Optional[str]:
+        from playweb.api.erc721 import cid_to_int_id
+        for cid in self._content_registry:
+            if cid_to_int_id(cid) == int_id:
+                return cid
+        return None
+
     # ─── Edition Registry ─────────────────────────────────────────
 
     def save_edition_record(self, record: Dict) -> bool:
