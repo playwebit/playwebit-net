@@ -193,6 +193,22 @@ class BasePlugin(ABC):
             return []
         return self._node.edition_registry.get_all_editions(cid)
 
+    def get_nft_metadata(self, cid: str, chain_record: dict) -> dict:
+        """
+        Optional: enrich NFT metadata for MetaMask display.
+        Called by /api/metadata/{cid} endpoint.
+    
+        Return dict to merge with default metadata:
+        {
+            "name":       "My File Name",
+            "image":      "data:image/jpeg;base64,...",  or IPFS URL
+            "attributes": [...additional attributes...]
+        }
+    
+        Return None to use default chain metadata only.
+        """
+        return None
+
     # ─────────────────────────────────────────────────────────────
     # Plugin info
     # ─────────────────────────────────────────────────────────────
