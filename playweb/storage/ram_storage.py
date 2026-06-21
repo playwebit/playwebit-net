@@ -92,8 +92,11 @@ class RAMStorage(ChainStorage):
     # ─── Edition Registry ─────────────────────────────────────────
 
     def save_edition_record(self, record: Dict) -> bool:
-        key = f"{record['cid']}:{record['edition_number']}"
-        self._edition_registry[key] = record
+        normalised = dict(record)
+        if normalised.get("current_owner"):
+            normalised["current_owner"] = normalised["current_owner"].lower()
+        key = f"{normalised['cid']}:{normalised['edition_number']}"
+        self._edition_registry[key] = normalised
         return True
 
     def get_edition_record(self, cid: str, edition_number: int) -> Optional[Dict]:
