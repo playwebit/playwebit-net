@@ -299,6 +299,31 @@ class SupabaseStorage(ChainStorage):
             logger.error(f"get_content_record error: {e}")
             return None
 
+    def get_all_content_by_owner(self, address: str) -> List[Dict]:
+        try:
+            res = (
+                self._t("pw_content_registry")
+                .select("*")
+                .eq("current_owner", address.lower())
+                .execute()
+            )
+            return res.data or []
+        except Exception as e:
+            logger.error(f"get_all_content_by_owner error: {e}")
+            return []
+    
+    def get_cid_by_int_id(self, int_id: int) -> Optional[str]:
+        try:
+            from playweb.api.erc721 import cid_to_int_id
+            res = self._t("pw_content_registry").select("cid").execute()
+            for r in (res.data or []):
+                if cid_to_int_id(r["cid"]) == int_id:
+                    return r["cid"]
+            return None
+        except Exception as e:
+            logger.error(f"get_cid_by_int_id error: {e}")
+            return None
+
     # ─── Edition Registry ─────────────────────────────────────────
 
     def save_edition_record(self, record: Dict) -> bool:
