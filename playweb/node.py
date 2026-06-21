@@ -205,10 +205,14 @@ class PlayWebitNode:
         from flask import Flask
         from playweb.api.node_api   import create_node_api
         from playweb.api.public_api import create_public_api
+        from playweb.api.rpc      import create_rpc
+        from playweb.api.metadata import create_metadata_api
 
         app = Flask(__name__)
         app.register_blueprint(create_node_api(self))
         app.register_blueprint(create_public_api(self))
+        app.register_blueprint(create_rpc(self))
+        app.register_blueprint(create_metadata_api(self))
 
         self._flask_app = app
 
