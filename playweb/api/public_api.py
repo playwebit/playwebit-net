@@ -335,3 +335,36 @@ def create_public_api(node) -> Blueprint:
             "total":   float(amount) + 1.0,
             "status":  "pending",
         })
+      
+      @bp.route("/api/editions/<path:cid>/available", methods=["GET"])
+      def get_available_editions(cid):
+          """
+          Editions still owned by original creator = not yet sold.
+          Used by CipherVault creator tab to show available editions.
+          """
+          content = node.blockchain.storage.get_content_record(cid)
+          if not content:
+              return jsonify({"success": False, "error": "CID not found"}), 404
+      
+          creator      = content["creator_wallet"]
+          all_editions = node.edition_registry.get_all_editions(cid)
+          total        = content["total_editions"]
+      
+          available = [
+              e for e in all_editions
+              if e["current_owner"].lower() == creator.lower()
+          ]
+          sold = [
+              e for e in all_editions
+              if e["current_owner"].lower() != creator.lower()
+          ]
+      
+          return jsonify({
+              "success":   True,
+              "cid":       cid,
+              "total":     total,
+              "available": len(available),
+              "sold":      len(sold),
+              "creator":   creator,
+              "editions":  all_editions,
+          })
