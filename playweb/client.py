@@ -74,6 +74,29 @@ class PlayWebitClient:
             logger.error(f"Client POST {path} failed: {e}")
             return {"success": False, "error": str(e)}
 
+    def transfer_plwb(
+        self,
+        from_addr: str,
+        to_addr:   str,
+        amount:    float,
+        signature: str,
+    ) -> Tuple[bool, str, Optional[str]]:
+        """
+        Transfer PLWB between any two wallets.
+        Requires MetaMask signature from sender.
+        Network fee: 1 PLWB (split 50/50).
+        Returns (success, reason, tx_hash).
+        """
+        res = self._post("/api/transfer", {
+            "from_addr": from_addr.lower(),
+            "to_addr":   to_addr.lower(),
+            "amount":    amount,
+            "signature": signature,
+        })
+        success = res.get("success", False)
+        result  = res.get("tx_hash") or res.get("error", "Unknown error")
+        return success, result, res.get("tx_hash")
+
     # ─────────────────────────────────────────────────────────────
     # Content Registry
     # ─────────────────────────────────────────────────────────────
