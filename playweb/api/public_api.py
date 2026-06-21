@@ -279,3 +279,59 @@ def create_public_api(node) -> Blueprint:
         })
 
     return bp
+
+    @bp.route("/api/transfer", methods=["POST"])
+    def transfer_plwb():
+        """
+        Transfer PLWB from one wallet to another.
+        Requires MetaMask signature from sender.
+        """
+        data      = request.get_json(silent=True) or {}
+        from_addr = data.get("from_addr")
+        to_addr   = data.get("to_addr")
+        amount    = data.get("amount")
+        signature = data.get("signature")
+    
+        if not all([from_addr, to_addr, amount, signature]):
+            return jsonify({
+                "success": False,
+                "error":   "Missing: from_addr, to_addr, amount, signature"
+            }), 400
+    
+        if float(amount) <= 0:
+            return jsonify({
+                "success": False,
+                "error":   "Amount must be greater than 0"
+            }), 400
+    
+        from playweb.core.transaction import Transaction
+        tx = Transaction(
+            from_addr = from_addr,
+            to_addr   = to_addr,
+            amount    = float(amount),
+            tx_type   = "transfer",
+            signature = signature,
+        )
+    
+        success, result = node.blockchain.add_transaction(
+            tx          = tx,
+            node_wallet = node.node_wallet,
+        )
+        if not success:
+            return jsonify({"success": False, "error": result}), 400
+    
+        node.gossip.broadcast_transaction(
+            tx    = tx,
+            peers = node.peer_manager.get_active_peers(),
+        )
+    
+        return jsonify({
+            "success": True,
+            "tx_hash": tx.hash,
+            "from":    from_addr,
+            "to":      to_addr,
+            "amount":  float(amount),
+            "fee":     1.0,
+            "total":   float(amount) + 1.0,
+            "status":  "pending",
+        })
