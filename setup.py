@@ -7,10 +7,12 @@ setup(
     name             = "playweb-node",
     version          = "1.0.0",
     author           = "PlayWebIT",
+    author_email     = "playwebit@gmail.com",
     description      = "PlayWebit Network — L1 blockchain SDK",
     long_description = long_description,
     long_description_content_type = "text/markdown",
     url              = "https://github.com/playwebit/playwebit-net",
+    license          = "Apache-2.0",
     packages         = find_packages(),
     python_requires  = ">=3.10",
 
