@@ -86,8 +86,18 @@ class ChainStorage(ABC):
     # Cross-platform CID ownership — the core value of the network
     # ─────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def normalise_record(record: Dict) -> Dict:
+        """Normalise wallet addresses to lowercase before saving."""
+        normalised = dict(record)
+        for key in ("creator_wallet", "first_owner", "current_owner"):
+            if normalised.get(key):
+                normalised[key] = normalised[key].lower()
+        return normalised
+
     @abstractmethod
     def save_content_record(self, record: Dict) -> bool:
+        record = self.normalise_record(record)
         """
         Save a content registration record.
         record keys:
