@@ -90,7 +90,15 @@ class SQLiteStorage(ChainStorage):
                     provenance      TEXT,
                     PRIMARY KEY (cid, edition_number)
                 );
-
+                
+                CREATE INDEX IF NOT EXISTS idx_content_owner
+                    ON content_registry(current_owner);
+                
+                CREATE INDEX IF NOT EXISTS idx_content_platform
+                    ON content_registry(first_platform);
+                
+                CREATE INDEX IF NOT EXISTS idx_editions_owner
+                    ON edition_registry(current_owner);
                 CREATE INDEX IF NOT EXISTS idx_blocks_index
                     ON blocks(idx);
                 CREATE INDEX IF NOT EXISTS idx_tx_block
