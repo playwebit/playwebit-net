@@ -39,12 +39,12 @@ def create_public_api(node) -> Blueprint:
         if not data:
             return jsonify({"success": False, "error": "Missing body"}), 400
 
-        chain_name  = data.get("chain_id") or data.get("chain_name")
-        spider_hash = data.get("spider_hash")
-        event_type  = data.get("event_type", "integrity_check")
+        chain_name      = data.get("chain_id") or data.get("chain_name")
+        spider_hash     = data.get("spider_hash")
+        event_type      = data.get("event_type", "integrity_check")
         platform_wallet = data.get("platform_wallet") or data.get("wallet")
-        signature   = data.get("signature")
-        metadata    = data.get("metadata", {})
+        signature       = data.get("signature")
+        metadata        = data.get("metadata", {})
 
         if not chain_name or not spider_hash:
             return jsonify({
@@ -89,10 +89,10 @@ def create_public_api(node) -> Blueprint:
         )
 
         return jsonify({
-            "success":   True,
-            "tx_hash":   tx.hash,
-            "chain_id":  chain_name,
-            "status":    "pending",
+            "success":  True,
+            "tx_hash":  tx.hash,
+            "chain_id": chain_name,
+            "status":   "pending",
         })
 
     # ─────────────────────────────────────────────────────────────
@@ -118,12 +118,12 @@ def create_public_api(node) -> Blueprint:
     @bp.route("/spider_hashes/<chain_name>", methods=["GET"])
     def get_spider_hashes(chain_name):
         hashes = []
-    
+
         # ── Confirmed (in blocks) ─────────────────────────────────
         length    = node.blockchain.get_chain_length()
         scan_from = max(0, length - 1000)
         blocks    = node.blockchain.get_blocks_from(scan_from, 1000)
-    
+
         for block in blocks:
             for tx in block.transactions:
                 if (
@@ -139,7 +139,7 @@ def create_public_api(node) -> Blueprint:
                         "event_type":  tx.data.get("event_type")
                                        if tx.data else None,
                     })
-    
+
         # ── Pending (in mempool — not yet mined) ─────────────────
         for tx in node.blockchain.mempool.get_pending():
             if (
@@ -155,7 +155,7 @@ def create_public_api(node) -> Blueprint:
                     "event_type":  tx.data.get("event_type")
                                    if tx.data else None,
                 })
-    
+
         return jsonify({
             "success":    True,
             "chain_name": chain_name,
@@ -173,9 +173,9 @@ def create_public_api(node) -> Blueprint:
     def get_balance(address):
         balance = node.blockchain.get_balance(address)
         return jsonify({
-            "success": True,
-            "address": address.lower(),
-            "balance": balance,
+            "success":  True,
+            "address":  address.lower(),
+            "balance":  balance,
             "currency": "PLWB",
         })
 
@@ -209,6 +209,67 @@ def create_public_api(node) -> Blueprint:
         return jsonify({"success": success, "result": result})
 
     # ─────────────────────────────────────────────────────────────
+    # PLWB Transfer between wallets
+    # ─────────────────────────────────────────────────────────────
+
+    @bp.route("/transfer", methods=["POST"])
+    def transfer_plwb():
+        """
+        Transfer PLWB from one wallet to another.
+        Requires MetaMask signature from sender.
+        Network fee: 1 PLWB split 50/50.
+        """
+        data      = request.get_json(silent=True) or {}
+        from_addr = data.get("from_addr")
+        to_addr   = data.get("to_addr")
+        amount    = data.get("amount")
+        signature = data.get("signature")
+
+        if not all([from_addr, to_addr, amount, signature]):
+            return jsonify({
+                "success": False,
+                "error":   "Missing: from_addr, to_addr, amount, signature",
+            }), 400
+
+        if float(amount) <= 0:
+            return jsonify({
+                "success": False,
+                "error":   "Amount must be greater than 0",
+            }), 400
+
+        from playweb.core.transaction import Transaction
+        tx = Transaction(
+            from_addr = from_addr,
+            to_addr   = to_addr,
+            amount    = float(amount),
+            tx_type   = "transfer",
+            signature = signature,
+        )
+
+        success, result = node.blockchain.add_transaction(
+            tx          = tx,
+            node_wallet = node.node_wallet,
+        )
+        if not success:
+            return jsonify({"success": False, "error": result}), 400
+
+        node.gossip.broadcast_transaction(
+            tx    = tx,
+            peers = node.peer_manager.get_active_peers(),
+        )
+
+        return jsonify({
+            "success": True,
+            "tx_hash": tx.hash,
+            "from":    from_addr,
+            "to":      to_addr,
+            "amount":  float(amount),
+            "fee":     1.0,
+            "total":   float(amount) + 1.0,
+            "status":  "pending",
+        })
+
+    # ─────────────────────────────────────────────────────────────
     # Content ownership
     # ─────────────────────────────────────────────────────────────
 
@@ -235,9 +296,17 @@ def create_public_api(node) -> Blueprint:
         cid    = data.get("cid")
         wallet = data.get("wallet")
         if not cid or not wallet:
-            return jsonify({"success": False, "error": "Missing cid or wallet"}), 400
+            return jsonify({
+                "success": False,
+                "error":   "Missing cid or wallet",
+            }), 400
         owns = node.content_registry.verify_ownership(cid, wallet)
-        return jsonify({"success": True, "owns": owns, "cid": cid, "wallet": wallet})
+        return jsonify({
+            "success": True,
+            "owns":    owns,
+            "cid":     cid,
+            "wallet":  wallet,
+        })
 
     # ─────────────────────────────────────────────────────────────
     # Editions
@@ -255,6 +324,39 @@ def create_public_api(node) -> Blueprint:
         if not edition:
             return jsonify({"success": False, "error": "Edition not found"}), 404
         return jsonify({"success": True, "edition": edition})
+
+    @bp.route("/editions/<path:cid>/available", methods=["GET"])
+    def get_available_editions(cid):
+        """
+        Editions still owned by original creator = not yet sold.
+        Used by CipherVault creator tab to show available editions.
+        """
+        content = node.blockchain.storage.get_content_record(cid)
+        if not content:
+            return jsonify({"success": False, "error": "CID not found"}), 404
+
+        creator      = content["creator_wallet"]
+        all_editions = node.edition_registry.get_all_editions(cid)
+        total        = content["total_editions"]
+
+        available = [
+            e for e in all_editions
+            if e["current_owner"].lower() == creator.lower()
+        ]
+        sold = [
+            e for e in all_editions
+            if e["current_owner"].lower() != creator.lower()
+        ]
+
+        return jsonify({
+            "success":   True,
+            "cid":       cid,
+            "total":     total,
+            "available": len(available),
+            "sold":      len(sold),
+            "creator":   creator,
+            "editions":  all_editions,
+        })
 
     # ─────────────────────────────────────────────────────────────
     # Network stats
@@ -278,93 +380,4 @@ def create_public_api(node) -> Blueprint:
             "plugins":      node.plugin_manager.get_status(),
         })
 
-    return bp
-
-    @bp.route("/api/transfer", methods=["POST"])
-    def transfer_plwb():
-        """
-        Transfer PLWB from one wallet to another.
-        Requires MetaMask signature from sender.
-        """
-        data      = request.get_json(silent=True) or {}
-        from_addr = data.get("from_addr")
-        to_addr   = data.get("to_addr")
-        amount    = data.get("amount")
-        signature = data.get("signature")
-    
-        if not all([from_addr, to_addr, amount, signature]):
-            return jsonify({
-                "success": False,
-                "error":   "Missing: from_addr, to_addr, amount, signature"
-            }), 400
-    
-        if float(amount) <= 0:
-            return jsonify({
-                "success": False,
-                "error":   "Amount must be greater than 0"
-            }), 400
-    
-        from playweb.core.transaction import Transaction
-        tx = Transaction(
-            from_addr = from_addr,
-            to_addr   = to_addr,
-            amount    = float(amount),
-            tx_type   = "transfer",
-            signature = signature,
-        )
-    
-        success, result = node.blockchain.add_transaction(
-            tx          = tx,
-            node_wallet = node.node_wallet,
-        )
-        if not success:
-            return jsonify({"success": False, "error": result}), 400
-    
-        node.gossip.broadcast_transaction(
-            tx    = tx,
-            peers = node.peer_manager.get_active_peers(),
-        )
-    
-        return jsonify({
-            "success": True,
-            "tx_hash": tx.hash,
-            "from":    from_addr,
-            "to":      to_addr,
-            "amount":  float(amount),
-            "fee":     1.0,
-            "total":   float(amount) + 1.0,
-            "status":  "pending",
-        })
-      
-      @bp.route("/api/editions/<path:cid>/available", methods=["GET"])
-      def get_available_editions(cid):
-          """
-          Editions still owned by original creator = not yet sold.
-          Used by CipherVault creator tab to show available editions.
-          """
-          content = node.blockchain.storage.get_content_record(cid)
-          if not content:
-              return jsonify({"success": False, "error": "CID not found"}), 404
-      
-          creator      = content["creator_wallet"]
-          all_editions = node.edition_registry.get_all_editions(cid)
-          total        = content["total_editions"]
-      
-          available = [
-              e for e in all_editions
-              if e["current_owner"].lower() == creator.lower()
-          ]
-          sold = [
-              e for e in all_editions
-              if e["current_owner"].lower() != creator.lower()
-          ]
-      
-          return jsonify({
-              "success":   True,
-              "cid":       cid,
-              "total":     total,
-              "available": len(available),
-              "sold":      len(sold),
-              "creator":   creator,
-              "editions":  all_editions,
-          })
+    return bp  # ← always last, after ALL routes
