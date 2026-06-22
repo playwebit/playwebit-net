@@ -22,7 +22,7 @@ DECIMALS      = 18
 # Changing this = your blocks get rejected by network.
 # ─────────────────────────────────────────────
 
-AUTHORITY_WALLET = "0x119411e1CB00FE009b907eEA54467bFa5C8604dd"
+AUTHORITY_WALLET = "0x101A249DE184ECdA4b9D3B2c8844eaB8102bB378"
 
 # ─────────────────────────────────────────────
 # L1 FEES — enforced by consensus
