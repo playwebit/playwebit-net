@@ -37,27 +37,43 @@ class FeeEngine:
         Calculate the fee for a given transaction type.
         Returns:
             {
-                total:          float,  # total fee in PLWB
-                authority_cut:  float,  # goes to AUTHORITY_WALLET
-                node_cut:       float,  # goes to node operator
-                fee_type:       str,    # "split" | "authority_only" | "none"
+                total:          float,
+                authority_cut:  float,
+                node_cut:       float,
+                fee_type:       str,   "split" | "authority_only" | "none"
             }
         """
+        # ── Authority tx types never have fees ───────────────────
+        # genesis, reward, plwb_purchase, plwb_redeem,
+        # spider_hash_anchor — all free
+        if tx_type in AUTHORITY_TX_TYPES:
+            return {
+                "total":         0.0,
+                "authority_cut": 0.0,
+                "node_cut":      0.0,
+                "fee_type":      "none",
+            }
+
+        # ── Base network fee (50/50 split) ────────────────────────
         if tx_type == "fee":
-            total = TRANSACTION_FEE
-            return self._split(total)
+            return self._split(TRANSACTION_FEE)
 
+        # ── CID link fee (50/50 split) ────────────────────────────
         if tx_type == "cv_link":
-            total = CV_LINK_FEE
-            return self._split(total)
+            return self._split(CV_LINK_FEE)
 
-        if tx_type in ("transfer", "content_register", "ownership_transfer",
-                   "edition_transfer", "spider_hash_anchor", "node_register"):
-            total = TRANSACTION_FEE
-            return self._split(total)
+        # ── All standard user-facing tx types → 1 PLWB network fee
+        if tx_type in (
+            "transfer",             # PLWB transfer between any wallets
+            "content_register",     # register CID ownership
+            "ownership_transfer",   # transfer content (1:1 model)
+            "edition_transfer",     # transfer edition (creator model)
+            "node_register",        # platform registers on network
+        ):
+            return self._split(TRANSACTION_FEE)
 
+        # ── Redemption fee → 100% authority ──────────────────────
         if tx_type == "plwb_redeem":
-            # Redemption fee = 5% of redemption amount, 100% to authority
             total = amount * PLWB_REDEMPTION_FEE
             return {
                 "total":         total,
@@ -66,8 +82,7 @@ class FeeEngine:
                 "fee_type":      "authority_only",
             }
 
-        # No L1 fee for other tx types
-        # (platform fees are L2 territory)
+        # ── No fee for unknown/other tx types ────────────────────
         return {
             "total":         0.0,
             "authority_cut": 0.0,
@@ -92,21 +107,16 @@ class FeeEngine:
 
     def create_fee_transactions(
         self,
-        original_tx,          # the Transaction that triggered this fee
-        node_wallet: str,     # node operator's wallet
+        original_tx,
+        node_wallet: str,
     ) -> List:
         """
         Create the fee transactions for a given original transaction.
-        Returns a list of Transaction objects to be added to the block.
+        Returns list of Transaction objects to add to the block.
 
-        For split fees: returns 2 transactions
-            → 0.5 PLWB to AUTHORITY_WALLET
-            → 0.5 PLWB to node_wallet
-
-        For authority-only fees: returns 1 transaction
-            → fee to AUTHORITY_WALLET
-
-        For no-fee tx types: returns []
+        Split fees → 2 transactions (authority + node)
+        Authority-only fees → 1 transaction (authority only)
+        No fee → []
         """
         from playweb.core.transaction import Transaction
 
@@ -127,9 +137,9 @@ class FeeEngine:
                     tx_type   = "fee",
                     nonce     = original_tx.nonce + 1,
                     data      = {
-                        "fee_for":    original_tx.hash,
-                        "fee_split":  "authority",
-                        "split_pct":  FEE_SPLIT_AUTHORITY,
+                        "fee_for":   original_tx.hash,
+                        "fee_split": "authority",
+                        "split_pct": FEE_SPLIT_AUTHORITY,
                     }
                 ))
 
@@ -142,9 +152,9 @@ class FeeEngine:
                     tx_type   = "fee",
                     nonce     = original_tx.nonce + 2,
                     data      = {
-                        "fee_for":    original_tx.hash,
-                        "fee_split":  "node",
-                        "split_pct":  FEE_SPLIT_NODE,
+                        "fee_for":   original_tx.hash,
+                        "fee_split": "node",
+                        "split_pct": FEE_SPLIT_NODE,
                     }
                 ))
 
@@ -166,8 +176,8 @@ class FeeEngine:
 
     # ─────────────────────────────────────────────────────────────
     # Validate fee transactions in a block
-    # Called by every node during block validation
-    # This is what prevents fee manipulation
+    # Called by every node during consensus
+    # This prevents fee manipulation
     # ─────────────────────────────────────────────────────────────
 
     def validate_fee_transactions(
@@ -177,19 +187,12 @@ class FeeEngine:
     ) -> Tuple[bool, str]:
         """
         Validate that all fee transactions in a block are correct.
-        Called during consensus — every honest node runs this.
-
-        Checks:
-          1. Fee goes to correct wallets (AUTHORITY_WALLET + node_wallet)
-          2. Split is exactly 50/50
-          3. Redemption fee goes 100% to AUTHORITY_WALLET
-          4. No extra fee transactions that shouldn't be there
-
+        Every honest node runs this during consensus.
         Returns (is_valid, reason).
         """
         transactions = block.transactions
 
-        # Build a map of fee transactions keyed by the tx they're paying for
+        # Build map of fee txs keyed by the tx they're paying for
         fee_map: Dict[str, List] = {}
         for tx in transactions:
             if tx.tx_type == "fee":
@@ -197,11 +200,12 @@ class FeeEngine:
                 if fee_for:
                     fee_map.setdefault(fee_for, []).append(tx)
 
-        # For each non-fee transaction, validate its fees
+        # Validate each non-fee transaction
         for tx in transactions:
             if tx.tx_type == "fee":
-                continue  # skip fee txs themselves
+                continue
 
+            # Authority tx types never have fee transactions
             if tx.tx_type in AUTHORITY_TX_TYPES:
                 continue
 
@@ -216,7 +220,6 @@ class FeeEngine:
             fees = fee_map.get(tx.hash, [])
 
             if fee_info["fee_type"] == "split":
-                # Must have exactly 2 fee transactions
                 if len(fees) != 2:
                     return (
                         False,
@@ -224,7 +227,6 @@ class FeeEngine:
                         f"got {len(fees)}"
                     )
 
-                # Find authority and node fee txs
                 auth_fees = [
                     f for f in fees
                     if f.to_addr == AUTHORITY_WALLET.lower()
@@ -245,9 +247,12 @@ class FeeEngine:
                         f"Missing node fee for tx {tx.hash[:12]}"
                     )
 
-                # Validate amounts
-                expected_auth = round(fee_info["total"] * FEE_SPLIT_AUTHORITY, 8)
-                expected_node = round(fee_info["total"] * FEE_SPLIT_NODE, 8)
+                expected_auth = round(
+                    fee_info["total"] * FEE_SPLIT_AUTHORITY, 8
+                )
+                expected_node = round(
+                    fee_info["total"] * FEE_SPLIT_NODE, 8
+                )
 
                 if round(auth_fees[0].amount, 8) != expected_auth:
                     return (
@@ -263,24 +268,26 @@ class FeeEngine:
                     )
 
             elif fee_info["fee_type"] == "authority_only":
-                # Must have exactly 1 fee transaction to authority
                 if len(fees) != 1:
                     return (
                         False,
-                        f"Expected 1 fee tx for {tx.hash[:12]}, got {len(fees)}"
+                        f"Expected 1 fee tx for {tx.hash[:12]}, "
+                        f"got {len(fees)}"
                     )
                 if fees[0].to_addr != AUTHORITY_WALLET.lower():
                     return (
                         False,
-                        f"Authority-only fee going to wrong wallet: {fees[0].to_addr}"
+                        f"Authority-only fee going to wrong wallet: "
+                        f"{fees[0].to_addr}"
                     )
 
         return True, "Valid"
 
-    def get_required_balance_for_tx(self, tx_type: str, amount: float) -> float:
-        """
-        How much PLWB does a user need to submit this transaction?
-        amount + all fees.
-        """
+    def get_required_balance_for_tx(
+        self,
+        tx_type: str,
+        amount: float,
+    ) -> float:
+        """How much PLWB does sender need? amount + all fees."""
         fee_info = self.calculate_fee(tx_type, amount)
         return amount + fee_info["total"]
