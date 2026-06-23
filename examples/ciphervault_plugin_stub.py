@@ -25,9 +25,15 @@ class CipherVaultPlugin(BasePlugin):
 
     def __init__(self, supabase_url: str, supabase_key: str):
         super().__init__()
-        # CipherVault's own Supabase — separate from L1 storage
-        from supabase import create_client
-        self.supabase = create_client(supabase_url, supabase_key)
+        from supabase import create_client, ClientOptions
+        import httpx
+    
+        httpx_client = httpx.Client(
+            http2=False,
+            timeout=httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=5, keepalive_expiry=15.0),
+        )
+        self.supabase = create_client(supabase_url, supabase_key, options=ClientOptions(httpx_client=httpx_client))
 
     # ─────────────────────────────────────────────────────────────
     # L1 lifecycle hooks
