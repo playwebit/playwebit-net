@@ -70,9 +70,26 @@ class SupabaseStorage(ChainStorage):
 
     def __init__(self, url: str, key: str):
         try:
-            from supabase import create_client
-            self.sb = create_client(url, key)
-            logger.info("SupabaseStorage initialised")
+            from supabase import create_client, ClientOptions
+            import httpx
+
+            # HTTP/2 is the supabase-py default, but idle HTTP/2 streams get
+            # cleanly terminated by Supabase's edge on hosts like HF Spaces,
+            # surfacing as ConnectionTerminated / "Server disconnected" on
+            # the next reused request. Force HTTP/1.1 and recycle idle
+            # connections before the remote does it for us.
+            httpx_client = httpx.Client(
+                http2=False,
+                timeout=httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0),
+                limits=httpx.Limits(
+                    max_connections=20,
+                    max_keepalive_connections=5,
+                    keepalive_expiry=15.0,
+                ),
+            )
+            options = ClientOptions(httpx_client=httpx_client)
+            self.sb = create_client(url, key, options=options)
+            logger.info("SupabaseStorage initialised (HTTP/1.1, keepalive_expiry=15s)")
         except ImportError:
             raise ImportError(
                 "supabase package not installed. "
