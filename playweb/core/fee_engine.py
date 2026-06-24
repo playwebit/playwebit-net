@@ -226,46 +226,65 @@ class FeeEngine:
                         f"Expected 2 fee txs for {tx.hash[:12]}, "
                         f"got {len(fees)}"
                     )
-
-                auth_fees = [
-                    f for f in fees
-                    if f.to_addr == AUTHORITY_WALLET.lower()
-                ]
-                node_fees = [
-                    f for f in fees
-                    if f.to_addr == node_wallet.lower()
-                ]
-
-                if len(auth_fees) != 1:
+            
+                # Validate total fee amount is correct
+                total_fee_paid = sum(f.amount for f in fees)
+                expected_total = fee_info["total"]
+                if round(total_fee_paid, 8) != round(expected_total, 8):
                     return (
                         False,
-                        f"Missing authority fee for tx {tx.hash[:12]}"
+                        f"Wrong total fee for {tx.hash[:12]}: "
+                        f"expected {expected_total}, got {total_fee_paid}"
                     )
-                if len(node_fees) != 1:
-                    return (
-                        False,
-                        f"Missing node fee for tx {tx.hash[:12]}"
-                    )
-
-                expected_auth = round(
-                    fee_info["total"] * FEE_SPLIT_AUTHORITY, 8
-                )
-                expected_node = round(
-                    fee_info["total"] * FEE_SPLIT_NODE, 8
-                )
-
-                if round(auth_fees[0].amount, 8) != expected_auth:
-                    return (
-                        False,
-                        f"Wrong authority fee: expected {expected_auth}, "
-                        f"got {auth_fees[0].amount}"
-                    )
-                if round(node_fees[0].amount, 8) != expected_node:
-                    return (
-                        False,
-                        f"Wrong node fee: expected {expected_node}, "
-                        f"got {node_fees[0].amount}"
-                    )
+            
+                # When authority wallet == node wallet (same address)
+                # both fee txs go to same wallet — that's correct
+                if AUTHORITY_WALLET.lower() == node_wallet.lower():
+                    # Both fees go to same wallet — just check amounts
+                    assert len(fees) == 2
+                    for f in fees:
+                        if f.to_addr != AUTHORITY_WALLET.lower():
+                            return (
+                                False,
+                                f"Fee going to wrong wallet: {f.to_addr}"
+                            )
+                else:
+                    # Different wallets — check 50/50 split properly
+                    auth_fees = [
+                        f for f in fees
+                        if f.to_addr == AUTHORITY_WALLET.lower()
+                    ]
+                    node_fees = [
+                        f for f in fees
+                        if f.to_addr == node_wallet.lower()
+                    ]
+            
+                    if len(auth_fees) != 1:
+                        return (
+                            False,
+                            f"Missing authority fee for tx {tx.hash[:12]}"
+                        )
+                    if len(node_fees) != 1:
+                        return (
+                            False,
+                            f"Missing node fee for tx {tx.hash[:12]}"
+                        )
+            
+                    expected_auth = round(fee_info["total"] * FEE_SPLIT_AUTHORITY, 8)
+                    expected_node = round(fee_info["total"] * FEE_SPLIT_NODE, 8)
+            
+                    if round(auth_fees[0].amount, 8) != expected_auth:
+                        return (
+                            False,
+                            f"Wrong authority fee: expected {expected_auth}, "
+                            f"got {auth_fees[0].amount}"
+                        )
+                    if round(node_fees[0].amount, 8) != expected_node:
+                        return (
+                            False,
+                            f"Wrong node fee: expected {expected_node}, "
+                            f"got {node_fees[0].amount}"
+                        )
 
             elif fee_info["fee_type"] == "authority_only":
                 if len(fees) != 1:
