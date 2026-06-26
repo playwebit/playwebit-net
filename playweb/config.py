@@ -84,6 +84,7 @@ AUTHORITY_TX_TYPES = [
     "plwb_purchase",
     "plwb_redeem",
     "spider_hash_anchor",
+    "node_register",
 ]
 
 # ─────────────────────────────────────────────
