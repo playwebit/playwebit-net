@@ -214,63 +214,58 @@ def create_public_api(node) -> Blueprint:
 
     @bp.route("/transfer", methods=["POST"])
     def transfer_plwb():
-        data = request.get_json(silent=True) or {}
-    
-        # If full tx dict provided (pre-signed) — use it directly
-        if "hash" in data and "signature" in data and "nonce" in data:
-            from playweb.core.transaction import Transaction
-            try:
-                tx = Transaction.from_dict(data)
-            except Exception as e:
-                return jsonify({"success": False, "error": f"Invalid tx: {e}"}), 400
-        else:
-            # Build from individual fields
-            from_addr = data.get("from_addr")
-            to_addr   = data.get("to_addr")
-            amount    = data.get("amount")
-            signature = data.get("signature")
-    
-            if not all([from_addr, to_addr, amount, signature]):
-                return jsonify({
-                    "success": False,
-                    "error":   "Missing: from_addr, to_addr, amount, signature",
-                }), 400
-    
-            if float(amount) <= 0:
-                return jsonify({
-                    "success": False,
-                    "error":   "Amount must be greater than 0",
-                }), 400
-    
-            from playweb.core.transaction import Transaction
-            tx = Transaction(
-                from_addr = from_addr,
-                to_addr   = to_addr,
-                amount    = float(amount),
-                tx_type   = "transfer",
-                signature = signature,
-            )
-    
+        """
+        Transfer PLWB from one wallet to another.
+        Requires MetaMask signature from sender.
+        Network fee: 1 PLWB split 50/50.
+        """
+        data      = request.get_json(silent=True) or {}
+        from_addr = data.get("from_addr")
+        to_addr   = data.get("to_addr")
+        amount    = data.get("amount")
+        signature = data.get("signature")
+
+        if not all([from_addr, to_addr, amount, signature]):
+            return jsonify({
+                "success": False,
+                "error":   "Missing: from_addr, to_addr, amount, signature",
+            }), 400
+
+        if float(amount) <= 0:
+            return jsonify({
+                "success": False,
+                "error":   "Amount must be greater than 0",
+            }), 400
+
+        from playweb.core.transaction import Transaction
+        tx = Transaction(
+            from_addr = from_addr,
+            to_addr   = to_addr,
+            amount    = float(amount),
+            tx_type   = "transfer",
+            signature = signature,
+        )
+
         success, result = node.blockchain.add_transaction(
             tx          = tx,
             node_wallet = node.node_wallet,
         )
         if not success:
             return jsonify({"success": False, "error": result}), 400
-    
+
         node.gossip.broadcast_transaction(
             tx    = tx,
             peers = node.peer_manager.get_active_peers(),
         )
-    
+
         return jsonify({
             "success": True,
             "tx_hash": tx.hash,
-            "from":    tx.from_addr,
-            "to":      tx.to_addr,
-            "amount":  tx.amount,
+            "from":    from_addr,
+            "to":      to_addr,
+            "amount":  float(amount),
             "fee":     1.0,
-            "total":   tx.amount + 1.0,
+            "total":   float(amount) + 1.0,
             "status":  "pending",
         })
 
@@ -361,6 +356,119 @@ def create_public_api(node) -> Blueprint:
             "sold":      len(sold),
             "creator":   creator,
             "editions":  all_editions,
+        })
+
+    # ─────────────────────────────────────────────────────────────
+    # Node Registration — Sybil Resistance
+    # Called by your PlayWebit Portal admin dashboard
+    # when approving a new platform/validator
+    # ─────────────────────────────────────────────────────────────
+
+    @bp.route("/node/register", methods=["POST"])
+    def register_node():
+        """
+        Register a node wallet as a validator on the network.
+        Only callable with X-Authority-Secret header.
+        Submits a node_register tx signed by authority wallet.
+        After next block mines, the node can participate in consensus.
+        """
+        import os
+        import time
+
+        # Verify internal secret — only your portal can call this
+        secret = request.headers.get("X-Authority-Secret")
+        if secret != os.getenv("AUTHORITY_INTERNAL_SECRET", ""):
+            return jsonify({
+                "success": False,
+                "error":   "Unauthorized — X-Authority-Secret required",
+            }), 401
+
+        data            = request.get_json(silent=True) or {}
+        platform_wallet = data.get("platform_wallet", "").lower()
+        platform_id     = data.get("platform_id", "unknown")
+        node_url        = data.get("node_url", "")
+
+        if not platform_wallet:
+            return jsonify({
+                "success": False,
+                "error":   "Missing platform_wallet",
+            }), 400
+
+        if not platform_wallet.startswith("0x") or len(platform_wallet) != 42:
+            return jsonify({
+                "success": False,
+                "error":   "Invalid wallet address format",
+            }), 400
+
+        # Check if already registered
+        if node.consensus._is_registered_node(platform_wallet):
+            return jsonify({
+                "success":         True,
+                "already_registered": True,
+                "platform_wallet": platform_wallet,
+                "message":         "Node already registered as validator",
+            })
+
+        # Submit node_register tx from authority wallet
+        from playweb.core.transaction import Transaction
+
+        tx = Transaction(
+            from_addr = node.node_wallet,
+            to_addr   = platform_wallet,
+            amount    = 0,
+            tx_type   = "node_register",
+            nonce     = int(time.time() * 1000),
+            data      = {
+                "platform_id":  platform_id,
+                "node_url":     node_url,
+                "approved_at":  time.time(),
+                "approved_by":  node.node_wallet,
+            },
+        )
+
+        success, result = node.blockchain.add_transaction(
+            tx          = tx,
+            node_wallet = node.node_wallet,
+        )
+
+        if not success:
+            return jsonify({"success": False, "error": result}), 400
+
+        # Broadcast to peers
+        node.gossip.broadcast_transaction(
+            tx    = tx,
+            peers = node.peer_manager.get_active_peers(),
+        )
+
+        logger.info(
+            f"Node registration submitted: {platform_wallet[:12]}... "
+            f"({platform_id})"
+        )
+
+        return jsonify({
+            "success":         True,
+            "tx_hash":         tx.hash,
+            "platform_wallet": platform_wallet,
+            "platform_id":     platform_id,
+            "node_url":        node_url,
+            "status":          "pending",
+            "message":         (
+                f"{platform_id} will be a registered validator "
+                f"after next block is mined"
+            ),
+        })
+
+    @bp.route("/node/validators", methods=["GET"])
+    def get_validators():
+        """
+        Get list of all registered validator wallets.
+        Public endpoint — anyone can see who the validators are.
+        """
+        validators = node.consensus.get_registered_validators()
+        return jsonify({
+            "success":    True,
+            "count":      len(validators),
+            "validators": validators,
         })
 
     # ─────────────────────────────────────────────────────────────
