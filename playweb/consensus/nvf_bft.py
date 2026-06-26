@@ -11,12 +11,17 @@ Round phases mapped to NVF paper:
   NOTIFY  → Cyclic re-entry notification (plugins + peers notified)
 
 Tolerates up to f < n/3 faulty nodes (standard BFT guarantee).
+
+Sybil Resistance — Option A (Authority Whitelist):
+  Only nodes with a node_register tx signed by AUTHORITY_WALLET
+  can participate in consensus voting.
+  Attacker nodes are silently ignored even if connected.
 """
 
 import time
 import threading
 import logging
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Set
 
 from playweb.consensus.leader import LeaderElection
 from playweb.consensus.vote   import Vote
@@ -36,33 +41,49 @@ class ConsensusRound:
     """State for a single consensus round."""
 
     def __init__(self, block_index: int, block):
-        self.block_index   = block_index
-        self.block         = block
-        self.phase         = "PROPOSE"
+        self.block_index        = block_index
+        self.block              = block
+        self.phase              = "PROPOSE"
         self.votes: Dict[str, Vote] = {}   # voter_wallet → Vote
-        self.started_at    = time.time()
-        self.finalised     = False
-        self.failed        = False
+        self.started_at         = time.time()
+        self.finalised          = False
+        self.failed             = False
 
     def add_vote(self, vote: Vote) -> bool:
         """Add a vote. Returns True if new vote added."""
         if vote.voter_wallet in self.votes:
             return False
         if not vote.verify():
-            logger.warning(f"Invalid vote signature from {vote.voter_wallet[:8]}")
+            logger.warning(
+                f"Invalid vote signature from {vote.voter_wallet[:8]}"
+            )
             return False
         self.votes[vote.voter_wallet] = vote
         return True
 
-    def has_quorum(self, active_node_count: int, node_wallet: str = "") -> bool:
+    def has_quorum(
+        self,
+        active_node_count: int,
+        node_wallet: str = "",
+    ) -> bool:
+        """
+        Check if 2/3 quorum has been reached.
+
+        Single node rules:
+          - Authority node alone → can mine (bootstrapping phase)
+          - Non-authority node alone → must wait for peers (security)
+        """
         if active_node_count == 0:
             return False
+
+        # Single node special case
         if active_node_count == 1:
-            # Only authority node can mine alone
             if node_wallet.lower() == AUTHORITY_WALLET.lower():
                 return len(self.votes) >= 1
             else:
                 return False
+
+        # Multiple nodes — standard 2/3 quorum
         return len(self.votes) / active_node_count >= CONSENSUS_QUORUM
 
     def is_timed_out(self) -> bool:
@@ -76,9 +97,9 @@ class NVFBFTConsensus:
         blockchain,
         peer_manager,
         gossip,
-        node_wallet:       str,
-        node_private_key:  str,
-        plugin_manager     = None,
+        node_wallet:        str,
+        node_private_key:   str,
+        plugin_manager      = None,
         on_block_finalised: Optional[Callable] = None,
     ):
         self.blockchain         = blockchain
@@ -94,7 +115,14 @@ class NVFBFTConsensus:
         self._lock              = threading.Lock()
         self._running           = False
         self._thread:           Optional[threading.Thread] = None
-        self._batch_timer_start = None
+
+        # Batch mining timer
+        self._batch_timer_start: Optional[float] = None
+
+        # Sybil resistance — registered node wallet cache
+        # Loaded from chain on startup, updated on each new block
+        self._registered_nodes:        Set[str] = set()
+        self._registered_nodes_loaded: bool     = False
 
     # ─────────────────────────────────────────────────────────────
     # Lifecycle
@@ -102,14 +130,20 @@ class NVFBFTConsensus:
 
     def start(self):
         """Start the consensus loop in a background thread."""
+        # Load registered nodes from chain before starting
+        self._load_registered_nodes()
+
         self._running = True
         self._thread  = threading.Thread(
-            target=self._consensus_loop,
-            daemon=True,
-            name="nvf-bft-consensus"
+            target = self._consensus_loop,
+            daemon = True,
+            name   = "nvf-bft-consensus",
         )
         self._thread.start()
-        logger.info("NVF-BFT consensus started")
+        logger.info(
+            f"NVF-BFT consensus started — "
+            f"{len(self._registered_nodes)} registered validators"
+        )
 
     def stop(self):
         self._running = False
@@ -118,69 +152,148 @@ class NVFBFTConsensus:
         logger.info("NVF-BFT consensus stopped")
 
     # ─────────────────────────────────────────────────────────────
-    # Main consensus loop
+    # Sybil Resistance — Registered Node Registry
+    # ─────────────────────────────────────────────────────────────
+
+    def _load_registered_nodes(self):
+        """
+        Load all registered validator wallets from chain.
+        Scans for node_register transactions signed by AUTHORITY_WALLET.
+        Authority wallet is always included (bootstrapping).
+        Called on startup and when new blocks arrive.
+        """
+        registered = {AUTHORITY_WALLET.lower()}
+
+        try:
+            length    = self.blockchain.get_chain_length()
+            scan_from = max(0, length - 100000)
+            blocks    = self.blockchain.get_blocks_from(scan_from, 100000)
+
+            for block in blocks:
+                for tx in block.transactions:
+                    if (
+                        tx.tx_type   == "node_register"
+                        and tx.from_addr == AUTHORITY_WALLET.lower()
+                    ):
+                        registered.add(tx.to_addr.lower())
+
+        except Exception as e:
+            logger.error(f"Error loading registered nodes: {e}")
+
+        self._registered_nodes        = registered
+        self._registered_nodes_loaded = True
+        logger.info(
+            f"Registered validators: {len(registered)} "
+            f"({', '.join(list(registered)[:3])}...)"
+        )
+
+    def _is_registered_node(self, wallet: str) -> bool:
+        """
+        Check if a wallet is a registered validator.
+        Authority wallet is always registered.
+        Other nodes must have a node_register tx on chain.
+        """
+        if not self._registered_nodes_loaded:
+            self._load_registered_nodes()
+        return wallet.lower() in self._registered_nodes
+
+    def _update_registered_nodes(self, block):
+        """
+        Update registered nodes cache from a newly finalised block.
+        Called after ANCHOR phase so new validators take effect
+        from the very next block.
+        """
+        for tx in block.transactions:
+            if (
+                tx.tx_type   == "node_register"
+                and tx.from_addr == AUTHORITY_WALLET.lower()
+            ):
+                self._registered_nodes.add(tx.to_addr.lower())
+                logger.info(
+                    f"New validator registered on chain: "
+                    f"{tx.to_addr[:12]}... "
+                    f"(platform: {tx.data.get('platform_id', 'unknown') if tx.data else 'unknown'})"
+                )
+
+    # ─────────────────────────────────────────────────────────────
+    # Main consensus loop — Batch Mining
     # ─────────────────────────────────────────────────────────────
 
     def _consensus_loop(self):
         """
-        Event-driven mining:
-        - Waits for first transaction
-        - Starts 5 minute batch timer
-        - Mines immediately if MAX_TX_PER_BLOCK reached
-        - Mines with whatever is pending when timer expires
+        Batch mining loop:
+        - Never mines empty blocks
+        - Starts timer when first tx hits mempool
+        - Mines immediately at MAX_TX_PER_BLOCK
+        - Mines with pending txs when BATCH_TIMEOUT expires
         """
         while self._running:
             try:
                 pending = self.blockchain.mempool.size()
-    
+
                 if pending == 0:
-                    # No transactions — just wait, don't mine empty blocks
+                    # No transactions — reset timer, wait
+                    self._batch_timer_start = None
                     time.sleep(5)
                     continue
-    
-                # Transactions exist — check if timer started
+
+                # First tx arrived — start timer
                 if self._batch_timer_start is None:
                     self._batch_timer_start = time.time()
                     logger.info(
-                        f"Mining timer started — "
-                        f"{pending} tx(s) pending, "
-                        f"waiting up to {BATCH_TIMEOUT}s or "
-                        f"{MAX_TX_PER_BLOCK} txs"
+                        f"Batch timer started — "
+                        f"{pending} tx(s) in mempool, "
+                        f"mining in {BATCH_TIMEOUT}s "
+                        f"or at {MAX_TX_PER_BLOCK} txs"
                     )
-    
+
                 elapsed     = time.time() - self._batch_timer_start
                 should_mine = (
-                    pending >= MAX_TX_PER_BLOCK   # max txs reached → mine now
-                    or elapsed >= BATCH_TIMEOUT    # 5 min passed → mine now
+                    pending >= MAX_TX_PER_BLOCK   # max txs → mine now
+                    or elapsed >= BATCH_TIMEOUT    # timeout → mine now
                 )
-    
+
                 if should_mine:
+                    reason = (
+                        "max_txs" if pending >= MAX_TX_PER_BLOCK
+                        else "timeout"
+                    )
                     logger.info(
-                        f"Mining block: {pending} txs, "
-                        f"elapsed={elapsed:.0f}s, "
-                        f"reason={'max_txs' if pending >= MAX_TX_PER_BLOCK else 'timeout'}"
+                        f"Mining: {pending} txs | "
+                        f"elapsed={elapsed:.0f}s | "
+                        f"reason={reason}"
                     )
                     self._run_round()
-                    self._batch_timer_start = None   # reset timer after mining
-    
+                    self._batch_timer_start = None  # reset after mining
+
             except Exception as e:
                 logger.error(f"Consensus error: {e}", exc_info=True)
                 self._batch_timer_start = None
-    
+
             time.sleep(5)   # check every 5 seconds
 
     def _run_round(self):
         """Execute one consensus round."""
-        tip           = self.blockchain.get_chain_tip()
-        next_index    = (tip.index + 1) if tip else 1
-        active_nodes  = [p.wallet for p in self.peer_manager.get_active_peers()]
+        tip        = self.blockchain.get_chain_tip()
+        next_index = (tip.index + 1) if tip else 1
 
-        # Include self in active nodes
-        if self.node_wallet not in active_nodes:
-            active_nodes.append(self.node_wallet)
+        # Only registered nodes count as active validators
+        active_nodes = [
+            p.wallet
+            for p in self.peer_manager.get_active_peers()
+            if self._is_registered_node(p.wallet)
+        ]
 
-        # PHASE: PROPOSE
-        # NVF: Spacetime Fabric activation
+        # Include self if registered
+        if self._is_registered_node(self.node_wallet):
+            if self.node_wallet not in active_nodes:
+                active_nodes.append(self.node_wallet)
+
+        if not active_nodes:
+            logger.warning("No registered validators available")
+            return
+
+        # PHASE: PROPOSE — NVF: Spacetime Fabric activation
         am_leader = self.leader_election.is_leader(
             self.node_wallet, next_index, active_nodes
         )
@@ -188,7 +301,8 @@ class NVFBFTConsensus:
         if am_leader:
             logger.info(
                 f"Round {next_index}: I am leader "
-                f"({self.node_wallet[:8]}...)"
+                f"({self.node_wallet[:8]}...) "
+                f"[{len(active_nodes)} validators]"
             )
             self._propose(next_index)
         else:
@@ -197,11 +311,9 @@ class NVFBFTConsensus:
                 f"Round {next_index}: waiting for leader "
                 f"{leader[:8] if leader else 'unknown'}..."
             )
-            # Wait for proposal — handled by on_propose() via HTTP
 
     # ─────────────────────────────────────────────────────────────
-    # Phase: PROPOSE
-    # NVF: Spacetime Fabric activation
+    # Phase: PROPOSE — NVF: Spacetime Fabric activation
     # ─────────────────────────────────────────────────────────────
 
     def _propose(self, block_index: int):
@@ -212,7 +324,7 @@ class NVFBFTConsensus:
             return
 
         with self._lock:
-            self.current_round = ConsensusRound(block_index, block)
+            self.current_round       = ConsensusRound(block_index, block)
             self.current_round.phase = "PREPARE"
 
         logger.info(
@@ -223,17 +335,16 @@ class NVFBFTConsensus:
 
         # Broadcast to all peers
         self.gossip.broadcast_block_proposal(
-            block         = block,
-            round_number  = block_index,
-            peers         = self.peer_manager.get_active_peers(),
+            block        = block,
+            round_number = block_index,
+            peers        = self.peer_manager.get_active_peers(),
         )
 
-        # Also vote for own proposal
+        # Vote for own proposal
         self._prepare_and_vote(block, block_index)
 
     # ─────────────────────────────────────────────────────────────
-    # Phase: PREPARE
-    # NVF: Six Directional Progressions (peer validation)
+    # Phase: PREPARE — NVF: Six Directional Progressions
     # ─────────────────────────────────────────────────────────────
 
     def on_propose(self, block, round_number: int, from_peer: str):
@@ -241,12 +352,19 @@ class NVFBFTConsensus:
         Called when we receive a block proposal from the leader.
         Validates and moves to VOTE phase.
         """
+        # Only accept proposals from registered nodes
+        if not self._is_registered_node(from_peer):
+            logger.warning(
+                f"Proposal from unregistered node "
+                f"{from_peer[:8]}... ignored (Sybil protection)"
+            )
+            return
+
         logger.info(
             f"PREPARE: received proposal for block {round_number} "
             f"from {from_peer[:8]}..."
         )
 
-        # Validate block
         tip           = self.blockchain.get_chain_tip()
         valid, reason = block.validate(previous_block=tip)
 
@@ -255,11 +373,9 @@ class NVFBFTConsensus:
             return
 
         with self._lock:
-            self.current_round = ConsensusRound(round_number, block)
+            self.current_round       = ConsensusRound(round_number, block)
             self.current_round.phase = "VOTE"
 
-        # PHASE: VOTE
-        # NVF: Planck Threshold approach
         self._prepare_and_vote(block, round_number)
 
     def _prepare_and_vote(self, block, round_number: int):
@@ -272,13 +388,11 @@ class NVFBFTConsensus:
         )
         vote.sign(self.node_private_key)
 
-        # Broadcast vote to all peers
         self.gossip.broadcast_vote(
             vote  = vote,
             peers = self.peer_manager.get_active_peers(),
         )
 
-        # Also count own vote
         self.on_vote(vote)
 
     # ─────────────────────────────────────────────────────────────
@@ -294,9 +408,19 @@ class NVFBFTConsensus:
         with self._lock:
             if not self.current_round:
                 return
+
+            # Sybil resistance — only registered nodes can vote
+            if not self._is_registered_node(vote.voter_wallet):
+                logger.warning(
+                    f"Vote ignored — unregistered node: "
+                    f"{vote.voter_wallet[:12]}... (Sybil protection)"
+                )
+                return
+
             if vote.block_hash != self.current_round.block.hash:
                 logger.debug(
-                    f"Vote for unknown block {vote.block_hash[:12]}... ignored"
+                    f"Vote for unknown block "
+                    f"{vote.block_hash[:12]}... ignored"
                 )
                 return
 
@@ -304,11 +428,16 @@ class NVFBFTConsensus:
             if not added:
                 return
 
-            active_count = len(self.peer_manager.get_active_peers()) + 1
+            # Count only registered active nodes
+            registered_peers = [
+                p for p in self.peer_manager.get_active_peers()
+                if self._is_registered_node(p.wallet)
+            ]
+            active_count = len(registered_peers) + 1  # +1 for self
             vote_count   = len(self.current_round.votes)
 
             logger.debug(
-                f"VOTE: {vote_count}/{active_count} votes "
+                f"VOTE: {vote_count}/{active_count} registered votes "
                 f"for block {self.current_round.block_index}"
             )
 
@@ -328,10 +457,7 @@ class NVFBFTConsensus:
     def _commit(self, block, votes: List[Vote]):
         """
         2/3 quorum reached. Finalise the block.
-
-        COMMIT  → write block to storage (ANCHOR)
-        ANCHOR  → NVF Layer 0 — permanent record
-        NOTIFY  → tell plugins + peers (Cyclic re-entry)
+        COMMIT → ANCHOR → NOTIFY
         """
         logger.info(
             f"COMMIT: block {block.index} finalised with "
@@ -339,7 +465,7 @@ class NVFBFTConsensus:
         )
 
         # ANCHOR — NVF Layer 0
-        vote_dicts = [v.to_dict() for v in votes]
+        vote_dicts      = [v.to_dict() for v in votes]
         success, reason = self.blockchain.add_block(
             block       = block,
             votes       = vote_dicts,
@@ -351,46 +477,64 @@ class NVFBFTConsensus:
             return
 
         logger.info(
-            f"ANCHOR: block {block.index} written to storage "
+            f"ANCHOR: block {block.index} written "
             f"({block.hash[:16]}...)"
         )
+
+        # Update registered nodes cache from this block
+        # New node_register txs take effect immediately
+        self._update_registered_nodes(block)
 
         # NOTIFY — Cyclic re-entry
         # 1. Notify plugins
         if self.plugin_manager:
             self.plugin_manager.notify_block_finalised(block)
 
-        # 2. Notify caller (node.py uses this to broadcast to peers)
+        # 2. Notify node (broadcasts to peers)
         if self.on_block_finalised:
             self.on_block_finalised(block, vote_dicts)
 
-        logger.info(f"NOTIFY: block {block.index} notifications sent")
+        logger.info(
+            f"NOTIFY: block {block.index} notifications sent"
+        )
 
     # ─────────────────────────────────────────────────────────────
     # Timeout handling
     # ─────────────────────────────────────────────────────────────
 
     def check_timeout(self):
-        """
-        Called periodically to check if current round timed out.
-        If so, reset and wait for next round.
-        """
+        """Check if current round timed out and reset if so."""
         with self._lock:
-            if self.current_round and self.current_round.is_timed_out():
+            if (
+                self.current_round
+                and self.current_round.is_timed_out()
+            ):
                 logger.warning(
                     f"Consensus round {self.current_round.block_index} "
                     f"timed out — resetting"
                 )
                 self.current_round = None
 
+    # ─────────────────────────────────────────────────────────────
+    # Status
+    # ─────────────────────────────────────────────────────────────
+
     def get_status(self) -> Dict:
         with self._lock:
-            if not self.current_round:
-                return {"status": "idle"}
-            return {
-                "status":       "in_round",
-                "block_index":  self.current_round.block_index,
-                "phase":        self.current_round.phase,
-                "votes":        len(self.current_round.votes),
-                "finalised":    self.current_round.finalised,
+            base = {
+                "registered_validators": len(self._registered_nodes),
             }
+            if not self.current_round:
+                return {**base, "status": "idle"}
+            return {
+                **base,
+                "status":      "in_round",
+                "block_index": self.current_round.block_index,
+                "phase":       self.current_round.phase,
+                "votes":       len(self.current_round.votes),
+                "finalised":   self.current_round.finalised,
+            }
+
+    def get_registered_validators(self) -> List[str]:
+        """Get list of all registered validator wallets."""
+        return list(self._registered_nodes)
