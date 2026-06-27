@@ -49,7 +49,8 @@ class Vote:
 
             msg      = encode_defunct(text=self.hash)
             signed   = Account.sign_message(msg, private_key=private_key)
-            self.signature = signed.signature.hex()
+            sig = signed.signature.hex()
+            self.signature = sig if sig.startswith("0x") else "0x" + sig
             return True
         except ImportError:
             # Basic placeholder if eth_account not available
