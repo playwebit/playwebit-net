@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 setup(
     name             = "playweb-node",
-    version          = "1.0.1",
+    version          = "1.0.2",
     author           = "PlayWebIT",
     author_email     = "playwebit@gmail.com",
     description      = "PlayWebit Network — L1 blockchain SDK",
@@ -39,7 +39,13 @@ setup(
 
     classifiers = [
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: MIT License",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "License :: OSI Approved :: Apache Software License",  # ← correct format
         "Operating System :: OS Independent",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+        "Topic :: Internet",
+        "Intended Audience :: Developers",
     ],
 )
