@@ -359,7 +359,7 @@ CREATE TABLE IF NOT EXISTS pw_edition_registry (
 | Repo | Description |
 |---|---|
 | [`playwebit/spiderweave-sdk`](https://github.com/playwebit/spiderweave-sdk) | Optional DB integrity hashing tool |
-| [`playwebit/cloudflare-bootstrap`](https://github.com/playwebit/cloudflare-bootstrap) | Cloudflare Worker for peer discovery |
+
 
 ---
 
