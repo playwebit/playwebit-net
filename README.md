@@ -2,7 +2,7 @@
 
 > Public blockchain infrastructure for cross-platform digital ownership, royalty enforcement, and content integrity verification.
 
-**Chain ID:** 4968 | **Currency:** PLWB | **Consensus:** NVF-BFT | **License:** Apache 2.0
+**Chain ID:** 4968 | **Currency:** PLWB | **Consensus:** NVF-BFT | **License:** GNU AGPL v3
 
 ---
 
@@ -367,8 +367,8 @@ CREATE TABLE IF NOT EXISTS pw_edition_registry (
 
 Copyright 2026 PlayWebIT
 
-Licensed under the Apache License, Version 2.0. You may obtain a copy at:
-http://www.apache.org/licenses/LICENSE-2.0
+Licensed under the GNU AGPL v3 You may obtain a copy at:
+https://choosealicense.com/licenses/agpl-3.0/
 
 ---
 
